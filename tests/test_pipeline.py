@@ -1,6 +1,8 @@
 import gzip
 import hashlib
 import io
+import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -8,14 +10,16 @@ import sys
 import tarfile
 import tempfile
 import unittest
+from unittest import mock
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPOSITORY_ROOT / "scripts"))
 
-from build import required_zig  # noqa: E402
+from build import deb_version, required_zig  # noqa: E402
 from common import extract  # noqa: E402
 from discover import latest_tag  # noqa: E402
+import maintain as maintain_script  # noqa: E402
 from repository import make_repository, prune_packages  # noqa: E402
 
 
@@ -265,6 +269,73 @@ class SignedRepositoryTests(unittest.TestCase):
                 retained.setdefault(name, set()).add(version)
 
             self.assertEqual(retained, expected)
+
+    def test_discovery_failures_preserve_current_package_without_engine(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            state = root / "state"
+            pool = state / "pool"
+            pool.mkdir(parents=True)
+            site = root / "site"
+            github_output = root / "github-output"
+            upstream = "1.2.3"
+            package_version = deb_version(upstream)
+            package = pool / f"uv_{package_version}_amd64.deb"
+            self._build_fixture(
+                root / "package-root",
+                package,
+                name="uv",
+                version=package_version,
+            )
+            previous_manifest = {
+                "uv": {
+                    "version": upstream,
+                    "url": "https://example.invalid/uv.tar.gz",
+                    "sha256": "0" * 64,
+                    "deb_version": package_version,
+                }
+            }
+            (state / "manifest.json").write_text(json.dumps(previous_manifest) + "\n")
+
+            def discovery_failure():
+                raise OSError("simulated network failure")
+
+            discoverers = {
+                "uv": lambda: {
+                    "version": upstream,
+                    "url": "https://example.invalid/uv.tar.gz",
+                    "sha256": "0" * 64,
+                },
+                "zig": discovery_failure,
+                "ghostty": discovery_failure,
+            }
+            with (
+                mock.patch.object(maintain_script, "DISCOVERERS", discoverers),
+                mock.patch.object(
+                    maintain_script,
+                    "run",
+                    side_effect=AssertionError("engine/build command must not run when pending is empty"),
+                ) as run_mock,
+                mock.patch.dict(os.environ, {"GITHUB_OUTPUT": str(github_output)}, clear=False),
+            ):
+                failures = maintain_script.maintain(state, site, "podman")
+
+            run_mock.assert_not_called()
+            self.assertEqual(len(failures), 2)
+            self.assertTrue(any(item.startswith("zig discovery:") for item in failures))
+            self.assertTrue(any(item.startswith("ghostty discovery:") for item in failures))
+            self.assertEqual(github_output.read_text(), "failures_count=2\n")
+
+            packages = (site / "dists/trixie/main/binary-amd64/Packages").read_text()
+            self.assertEqual(self._field(packages, "Package"), "uv")
+            self.assertEqual(self._field(packages, "Version"), package_version)
+            self.assertEqual(self._field(packages, "Filename"), f"pool/main/{package.name}")
+            self.assertTrue((site / "dists/trixie/InRelease").is_file())
+            self.assertTrue((site / "dists/trixie/Release.gpg").is_file())
+            self.assertEqual(json.loads((state / "manifest.json").read_text()), previous_manifest)
+            self.assertEqual(json.loads((site / "manifest.json").read_text()), previous_manifest)
+            self.assertEqual(json.loads((site / "failures.json").read_text()), failures)
+            self.assertTrue(package.is_file())
 
 
 if __name__ == "__main__":

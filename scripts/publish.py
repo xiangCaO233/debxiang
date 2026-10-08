@@ -27,17 +27,19 @@ def publish(site):
         if any(r["tagName"] == tag for r in releases):
             details = json.loads(run("gh", "release", "view", tag, "--repo", repository,
                                     "--json", "assets", capture_output=True, text=True).stdout)
+            checksum_asset = next((a for a in details["assets"] if a["name"] == checksum_file.name), None)
+            if checksum_asset:
+                with tempfile.TemporaryDirectory() as directory:
+                    run("gh", "release", "download", tag, "--repo", repository,
+                        "--pattern", checksum_file.name, "--dir", directory)
+                    if (Path(directory) / checksum_file.name).read_text() != checksum_file.read_text():
+                        raise ValueError(f"Published asset checksum differs: {tag}; increase packaging revision")
             if any(a["name"] == package.name for a in details["assets"]):
                 # Verify the public artifact before accepting a retry; a lost
                 # state directory must not silently change an existing asset.
+                if checksum_asset:
+                    continue
                 with tempfile.TemporaryDirectory() as directory:
-                    checksum_asset = next((a for a in details["assets"] if a["name"] == checksum_file.name), None)
-                    if checksum_asset:
-                        run("gh", "release", "download", tag, "--repo", repository,
-                            "--pattern", checksum_file.name, "--dir", directory)
-                        if (Path(directory) / checksum_file.name).read_text() != checksum_file.read_text():
-                            raise ValueError(f"Published asset checksum differs: {tag}; increase packaging revision")
-                        continue
                     run("gh", "release", "download", tag, "--repo", repository,
                         "--pattern", package.name, "--dir", directory)
                     existing = Path(directory) / package.name
