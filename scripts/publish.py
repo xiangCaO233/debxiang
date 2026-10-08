@@ -59,8 +59,11 @@ def publish(site):
             run("gh", "release", "upload", tag, package, "--repo", repository)
         else:
             run("gh", "release", "create", tag, package, checksum_file, "--repo", repository,
-                "--target", os.environ["GITHUB_SHA"], "--title", f"{name} {version}",
-                "--notes", "Automatically packaged from the stable upstream release. See the APT manifest for provenance.")
+                # A long build may finish after the workflow file changes on
+                # main. GITHUB_TOKEN cannot tag that older workflow commit;
+                # using the publishing branch avoids extra workflow scopes.
+                "--target", "main", "--title", f"{name} {version}",
+                "--notes", "Maintained from verified upstream stable packages. See the APT manifest for source URLs and checksums.")
 
 
 if __name__ == "__main__":
