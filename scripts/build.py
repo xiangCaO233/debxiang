@@ -173,7 +173,7 @@ def build(component, metadata, output):
             # Keep the upstream xterm-ghostty entry used by TERM, but never
             # claim ncurses-term's file or force dpkg to overwrite it.
             (root / "usr/share/terminfo/g/ghostty").unlink()
-            dependency = runtime_dependencies(root, binary) + ", ncurses-term"
+            dependency = runtime_dependencies(root, binary)
             add_copyright(root, "ghostty", source, "https://github.com/ghostty-org/ghostty")
             run(binary, "+version")
             control(root, "ghostty", upstream, dependency, "GPU accelerated terminal emulator")
