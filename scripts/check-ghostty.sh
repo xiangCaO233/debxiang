@@ -1,0 +1,26 @@
+#!/bin/sh
+# Check coexistence and upgrade with the real Debian terminfo package.
+set -eu
+apt-get update
+apt-get install --no-install-recommends -y ncurses-term
+alias=/usr/share/terminfo/g/ghostty
+before=$(sha256sum "$alias")
+dpkg-query -S "$alias"
+set -- /packages/ghostty_*.deb
+[ "$#" -eq 1 ]
+package=$1
+# The previous Griffo package owns xterm-ghostty, but not the ghostty alias.
+# Use the real new payload with an older version to exercise dpkg's upgrade.
+dpkg-deb --raw-extract "$package" /tmp/legacy-ghostty
+sed -i 's/^Version:.*/Version: 0.0.0-1/' /tmp/legacy-ghostty/DEBIAN/control
+[ ! -e /tmp/legacy-ghostty/usr/share/terminfo/g/ghostty ]
+[ ! -L /tmp/legacy-ghostty/usr/share/terminfo/g/ghostty ]
+dpkg-deb --root-owner-group --build /tmp/legacy-ghostty /tmp/legacy-ghostty.deb
+apt-get install --no-install-recommends -y /tmp/legacy-ghostty.deb
+apt-get install --no-install-recommends -y "$package"
+[ "$before" = "$(sha256sum "$alias")" ]
+dpkg-query -S "$alias"
+infocmp -x xterm-ghostty >/dev/null
+ghostty +version
+[ "$(dpkg-query -W -f='${Version}' ghostty)" = "$(dpkg-deb -f "$package" Version)" ]
+[ -z "$(dpkg --audit)" ]

@@ -11,20 +11,21 @@ from common import download, extract, get_json, request, run, version
 GHOSTTY_KEY = "RWQlAjJC23149WL2sEpT/l0QKy7hMIFhYdQOFy0Z7z7PbneUgvlsnYcV"
 
 
-def deb_version(upstream):
+def deb_version(upstream, component=None):
     # A new packaging revision must exceed Griffo's installed version too.
-    return version(upstream) + "-100~debxiang1~trixie"
+    revision = 2 if component == "ghostty" else 1
+    return version(upstream) + f"-100~debxiang{revision}~trixie"
 
 
-def package_version(metadata):
-    return metadata.get("deb_version") or deb_version(metadata["version"])
+def package_version(metadata, component=None):
+    return metadata.get("deb_version") or deb_version(metadata["version"], component)
 
 
 def control(root, name, upstream, depends="", description=""):
     directory = root / "DEBIAN"
     directory.mkdir(exist_ok=True)
     size = sum(p.stat().st_size for p in root.rglob("*") if p.is_file() and "DEBIAN" not in p.parts)
-    fields = [f"Package: {name}", f"Version: {deb_version(upstream)}", "Architecture: amd64",
+    fields = [f"Package: {name}", f"Version: {deb_version(upstream, name)}", "Architecture: amd64",
               "Maintainer: debxiang maintainers <noreply@github.com>", "Section: devel",
               "Priority: optional", f"Installed-Size: {(size + 1023) // 1024}"]
     if depends:
@@ -34,7 +35,7 @@ def control(root, name, upstream, depends="", description=""):
 
 
 def package(root, name, upstream, output):
-    target = output / f"{name}_{deb_version(upstream)}_amd64.deb"
+    target = output / f"{name}_{deb_version(upstream, name)}_amd64.deb"
     run("dpkg-deb", "--root-owner-group", "--build", root, target)
     return target
 
@@ -168,7 +169,11 @@ def build(component, metadata, output):
             binary = root / "usr/bin/ghostty"
             if not binary.is_file():
                 raise ValueError("Ghostty install did not produce /usr/bin/ghostty")
-            dependency = runtime_dependencies(root, binary)
+            # Debian ncurses-term owns the compatibility name "ghostty".
+            # Keep the upstream xterm-ghostty entry used by TERM, but never
+            # claim ncurses-term's file or force dpkg to overwrite it.
+            (root / "usr/share/terminfo/g/ghostty").unlink()
+            dependency = runtime_dependencies(root, binary) + ", ncurses-term"
             add_copyright(root, "ghostty", source, "https://github.com/ghostty-org/ghostty")
             run(binary, "+version")
             control(root, "ghostty", upstream, dependency, "GPU accelerated terminal emulator")

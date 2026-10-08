@@ -16,7 +16,7 @@ from unittest import mock
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPOSITORY_ROOT / "scripts"))
 
-from build import deb_version, required_zig  # noqa: E402
+from build import deb_version, package_version, required_zig  # noqa: E402
 from common import extract  # noqa: E402
 from discover import latest_tag  # noqa: E402
 import maintain as maintain_script  # noqa: E402
@@ -38,6 +38,17 @@ class DiscoveryTests(unittest.TestCase):
     def test_latest_tag_rejects_list_without_stable_release(self):
         with self.assertRaisesRegex(ValueError, "No stable Ghostty tag"):
             latest_tag([{"name": "tip"}, {"name": "v1.2.3-rc1"}])
+
+
+class PackagingVersionTests(unittest.TestCase):
+    def test_ghostty_fix_is_newer_without_rebuilding_other_components(self):
+        self.assertEqual(package_version({"version": "1.3.1"}, "ghostty"),
+                         "1.3.1-100~debxiang2~trixie")
+        self.assertEqual(package_version({"version": "0.12.23"}, "uv"),
+                         "0.12.23-100~debxiang1~trixie")
+        self.assertEqual(package_version({"version": "26.1002.52244",
+                                          "deb_version": "26.1002.52244"}, "chatgpt"),
+                         "26.1002.52244")
 
 
 class RequiredZigTests(unittest.TestCase):

@@ -33,14 +33,14 @@ def maintain(state, site, engine):
         previous = json.loads(manifest_file.read_text()) if manifest_file.exists() else {}
         for name, data in list(plan.items()):
             old = previous.get(name, {})
-            if (old.get("deb_version") == package_version(data) and old.get("sha256")
+            if (old.get("deb_version") == package_version(data, name) and old.get("sha256")
                     and data.get("sha256") and old["sha256"] != data["sha256"]):
                 failures.append(f"{name}: upstream changed the checksum without changing the version")
                 print(failures[-1], flush=True)
                 del plan[name]
         pending = [name for name, data in plan.items()
-                   if previous.get(name, {}).get("deb_version") != package_version(data)
-                   or not all((state / "pool" / f"{pkg}_{package_version(data)}_amd64.deb").is_file()
+                   if previous.get(name, {}).get("deb_version") != package_version(data, name)
+                   or not all((state / "pool" / f"{pkg}_{package_version(data, name)}_amd64.deb").is_file()
                               for pkg in PACKAGES[name])]
         print("Pending components:", ", ".join(pending) or "none", flush=True)
         deployed = state / "deployed-manifest.sha256"
@@ -76,7 +76,7 @@ def maintain(state, site, engine):
                                  component, "--plan", "/transaction/plan.json", "--output", "/transaction/packages"]
                         run(*args)
                         for package in PACKAGES[component]:
-                            artifact = output / f"{package}_{package_version(plan[component])}_amd64.deb"
+                            artifact = output / f"{package}_{package_version(plan[component], component)}_amd64.deb"
                             if not artifact.is_file():
                                 raise ValueError(f"Missing package: {artifact.name}")
                         # Install all outputs for this component in a clean base
@@ -85,8 +85,16 @@ def maintain(state, site, engine):
                         command = ("apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends -y /packages/" + pattern + "_*.deb " +
                                    ("/packages/zig-stable_*.deb " if component == "zig" else "") +
                                    "&& " + {"uv": "uv --version && uvx --version", "zig": "zig version && printf 'pub fn main() void {}' > /tmp/smoke.zig && zig build-exe /tmp/smoke.zig -femit-bin=/tmp/smoke && /tmp/smoke", "ghostty": "ghostty +version", "chatgpt": "dpkg-query -W chatgpt && test -x /usr/bin/chatgpt"}[component])
-                        run(engine, "run", "--rm", "-v", f"{output}:/packages:ro", "debian:trixie",
-                            "sh", "-ec", command)
+                        if component == "ghostty":
+                            # Cover both our target release and newer Debian
+                            # systems where ncurses-term already owns the alias.
+                            for suite in ("trixie", "sid"):
+                                run(engine, "run", "--rm", "-v", f"{output}:/packages:ro",
+                                    "-v", f"{ROOT}:/work:ro", "debian:" + suite,
+                                    "sh", "/work/scripts/check-ghostty.sh")
+                        else:
+                            run(engine, "run", "--rm", "-v", f"{output}:/packages:ro", "debian:trixie",
+                                "sh", "-ec", command)
                         completed.append(component)
                     except Exception as error:
                         failures.append(f"{component} build/install: {error}")
@@ -110,7 +118,7 @@ def maintain(state, site, engine):
                 raise RuntimeError("No verified packages available: " + "; ".join(failures))
             manifest = dict(previous)
             for component in completed:
-                manifest[component] = dict(plan[component], deb_version=package_version(plan[component]))
+                manifest[component] = dict(plan[component], deb_version=package_version(plan[component], component))
             if site.exists():
                 shutil.rmtree(site)
             fingerprint = make_repository(pool, site, state, manifest)
