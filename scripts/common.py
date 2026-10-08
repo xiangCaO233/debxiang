@@ -1,5 +1,6 @@
 """Small standard-library helpers shared by discovery and packaging."""
 import hashlib
+import http.client
 import json
 import os
 from pathlib import Path
@@ -10,6 +11,7 @@ import tarfile
 import tempfile
 import time
 import urllib.request
+import urllib.error
 
 
 def run(*args, **kwargs):
@@ -41,8 +43,18 @@ def request(url, *, api=False, offset=0):
 
 
 def get_json(url, *, api=False):
-    with request(url, api=api) as response:
-        return json.load(response)
+    for attempt in range(4):
+        try:
+            with request(url, api=api) as response:
+                return json.load(response)
+        except (urllib.error.URLError, http.client.IncompleteRead, TimeoutError,
+                json.JSONDecodeError) as error:
+            if isinstance(error, urllib.error.HTTPError) and error.code not in (429, 500, 502, 503, 504):
+                raise
+            if attempt == 3:
+                raise
+            print(f"Retrying upstream index {url}: {error}", flush=True)
+            time.sleep(3 * (attempt + 1))
 
 
 def version(value):

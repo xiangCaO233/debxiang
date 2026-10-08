@@ -6,6 +6,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import urllib.error
 from unittest import mock
 
 
@@ -129,6 +130,25 @@ class DownloadTests(unittest.TestCase):
             self.assertFalse(target.exists())
             self.assertFalse(target.with_suffix(target.suffix + ".part").exists())
             request_mock.assert_called_once_with("https://example.invalid/artifact", offset=0)
+            sleep_mock.assert_not_called()
+
+
+class IndexTests(unittest.TestCase):
+    def test_transient_network_error_retries_index(self):
+        response = FakeResponse(b'{"version":"1.2.3"}', status=200, headers={})
+        with (mock.patch.object(common, "request", side_effect=[urllib.error.URLError("interrupted"), response]) as request_mock,
+              mock.patch.object(common.time, "sleep") as sleep_mock):
+            self.assertEqual(common.get_json("https://example.invalid/index"), {"version": "1.2.3"})
+            self.assertEqual(request_mock.call_count, 2)
+            sleep_mock.assert_called_once_with(3)
+
+    def test_unauthorized_index_is_not_retried(self):
+        error = urllib.error.HTTPError("https://example.invalid/index", 401, "Unauthorized", {}, None)
+        with (mock.patch.object(common, "request", side_effect=error) as request_mock,
+              mock.patch.object(common.time, "sleep") as sleep_mock):
+            with self.assertRaises(urllib.error.HTTPError):
+                common.get_json("https://example.invalid/index")
+            request_mock.assert_called_once()
             sleep_mock.assert_not_called()
 
 
