@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import signal
 import tempfile
 from build import deb_version
 from common import run
@@ -112,6 +113,9 @@ def maintain(state, site, engine):
 
 
 if __name__ == "__main__":
+    def interrupted(signum, frame):
+        raise KeyboardInterrupt(f"Runner interrupted by signal {signum}")
+    signal.signal(signal.SIGTERM, interrupted)
     parser = argparse.ArgumentParser()
     parser.add_argument("--state", type=Path, required=True)
     parser.add_argument("--site", type=Path, required=True)
