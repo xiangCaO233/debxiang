@@ -33,6 +33,19 @@ class FakeResponse:
 
 
 class DownloadTests(unittest.TestCase):
+    def test_many_short_connections_can_finish_a_large_download(self):
+        payload = b"0123456"
+        responses = [FakeResponse(payload[:1], status=200, headers={"Content-Length": "7"})]
+        responses.extend(FakeResponse(payload[i:i + 1], status=206,
+                         headers={"Content-Range": f"bytes {i}-6/7"}) for i in range(1, 7))
+        with tempfile.TemporaryDirectory() as temporary:
+            target = Path(temporary) / "large-artifact"
+            with (mock.patch.object(common, "request", side_effect=responses) as request_mock,
+                  mock.patch.object(common.time, "sleep")):
+                common.download("https://example.invalid/artifact", target, hashlib.sha256(payload).hexdigest())
+                self.assertEqual(target.read_bytes(), payload)
+                self.assertEqual(request_mock.call_count, 7)
+
     def test_persistent_cache_reuses_verified_bytes_and_rejects_corruption(self):
         payload = b"verified cached upstream artifact"
         digest = hashlib.sha256(payload).hexdigest()

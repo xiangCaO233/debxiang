@@ -119,10 +119,15 @@ def _download(url, target, sha256=None):
                     raise ValueError(f"Incomplete download: expected {expected_total} bytes, received {received}")
                 break
             except Exception as error:
-                failures += 1
+                received = temporary.stat().st_size if temporary.exists() else 0
+                # Large assets may require many short connections. Limit
+                # consecutive failures without progress, rather than
+                # discarding a steadily advancing multi-hundred-MB download.
+                failures = 0 if received > offset else failures + 1
                 if failures >= 5:
                     raise
-                print(f"Download interrupted, retry {failures}/5: {error}", flush=True)
+                print(f"Download interrupted; resuming at {received} bytes "
+                      f"({failures}/5 failures without progress): {error}", flush=True)
                 time.sleep(3)
         temporary.replace(target)
     with target.open("rb") as stream:
