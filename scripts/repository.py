@@ -26,8 +26,8 @@ def prune_packages(pool, keep=3):
             raise ValueError("Invalid Debian package version")
         return -1 if result.returncode == 0 else 1
 
-    for group in groups.values():
-        retained = 1 if group[0][1].name.startswith("chatgpt_") else keep
+    for name, group in groups.items():
+        retained = 1 if name == "chatgpt" else keep
         for _, path in sorted(group, key=cmp_to_key(compare))[retained:]:
             path.unlink()
 
