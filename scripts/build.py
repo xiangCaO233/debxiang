@@ -16,6 +16,10 @@ def deb_version(upstream):
     return version(upstream) + "-100~debxiang1~trixie"
 
 
+def package_version(metadata):
+    return metadata.get("deb_version") or deb_version(metadata["version"])
+
+
 def control(root, name, upstream, depends="", description=""):
     directory = root / "DEBIAN"
     directory.mkdir(exist_ok=True)
@@ -72,6 +76,21 @@ def add_copyright(root, name, source, upstream_url):
 
 
 def build(component, metadata, output):
+    if component == "chatgpt":
+        # Mirror the exact vendor package, including its licenses, control
+        # fields and update hooks. Never relabel it as a locally built app.
+        with tempfile.TemporaryDirectory(prefix="debxiang-chatgpt-") as temporary:
+            original = Path(temporary) / "chatgpt.deb"
+            download(metadata["url"], original, metadata["sha256"])
+            expected = {"Package": "chatgpt", "Version": metadata["deb_version"], "Architecture": "amd64"}
+            for field, value in expected.items():
+                actual = run("dpkg-deb", "--field", original, field, capture_output=True, text=True).stdout.strip()
+                if actual != value:
+                    raise ValueError(f"Official ChatGPT {field} differs from signed metadata")
+            if original.stat().st_size != metadata["size"]:
+                raise ValueError("Official ChatGPT package size mismatch")
+            shutil.copy2(original, output / f"chatgpt_{metadata['deb_version']}_amd64.deb")
+        return
     upstream = version(metadata["version"])
     with tempfile.TemporaryDirectory(prefix="debxiang-") as temporary:
         work = Path(temporary)
@@ -159,7 +178,7 @@ def build(component, metadata, output):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("component", choices=["uv", "zig", "ghostty"])
+    parser.add_argument("component", choices=["uv", "zig", "ghostty", "chatgpt"])
     parser.add_argument("--plan", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()

@@ -2,6 +2,7 @@
 import json
 import re
 from common import get_json, version
+from openai_package import discover_chatgpt
 
 
 def latest_tag(tags):
@@ -42,7 +43,8 @@ def discover_ghostty():
             "url": f"https://release.files.ghostty.org/{ghostty}/ghostty-{ghostty}.tar.gz"}
 
 
-DISCOVERERS = {"uv": discover_uv, "zig": discover_zig, "ghostty": discover_ghostty}
+DISCOVERERS = {"uv": discover_uv, "zig": discover_zig, "ghostty": discover_ghostty,
+              "chatgpt": discover_chatgpt}
 
 
 def discover():

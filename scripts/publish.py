@@ -16,7 +16,7 @@ def publish(site):
     for package in sorted((site / "pool").rglob("*.deb")):
         name, version, _ = package.name.split("_", 2)
         # Debian versions allow '~', but Git tags explicitly forbid it.
-        tag = f"{name}-{version.replace('~', '-')}"
+        tag = f"{name}-{version.replace('~', '-').replace(':', '-')}"
         # List explicitly: a network/permission error must not be mistaken
         # for an absent release and cause an unrelated create attempt.
         with package.open("rb") as stream:
