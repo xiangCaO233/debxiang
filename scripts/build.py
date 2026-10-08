@@ -162,6 +162,7 @@ def build(component, metadata, output):
                                PATH=str(compiler.parent) + os.pathsep + os.environ["PATH"])
             run("bash", source / "nix/build-support/fetch-zig-cache.sh", cwd=source, env=environment)
             run(compiler, "build", "--prefix", "/usr", "--system", work / "zig-cache/p",
+                "-fno-sys=harfbuzz",
                 "-Doptimize=ReleaseFast", "-Dcpu=baseline",
                 "-j" + str(jobs), cwd=source, env=environment)
             binary = root / "usr/bin/ghostty"
