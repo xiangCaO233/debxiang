@@ -90,7 +90,8 @@ def maintain(state, site, engine):
                             # systems where ncurses-term already owns the alias.
                             for suite in ("trixie", "sid"):
                                 run(engine, "run", "--rm", "-v", f"{output}:/packages:ro",
-                                    "-v", f"{ROOT}:/work:ro", "debian:" + suite,
+                                    "-v", f"{ROOT}:/work:ro", "-v", f"{state / 'pool'}:/previous:ro",
+                                    "debian:" + suite,
                                     "sh", "/work/scripts/check-ghostty.sh")
                         else:
                             run(engine, "run", "--rm", "-v", f"{output}:/packages:ro", "debian:trixie",
