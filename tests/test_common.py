@@ -1,5 +1,6 @@
 import hashlib
 import io
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -31,6 +32,42 @@ class FakeResponse:
 
 
 class DownloadTests(unittest.TestCase):
+    def test_persistent_cache_reuses_verified_bytes_and_rejects_corruption(self):
+        payload = b"verified cached upstream artifact"
+        digest = hashlib.sha256(payload).hexdigest()
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            cache = root / "cache"
+            response = FakeResponse(payload, status=200, headers={"Content-Length": str(len(payload))})
+            with (mock.patch.dict(os.environ, {"DEBXIANG_DOWNLOAD_CACHE": str(cache)}),
+                  mock.patch.object(common, "request", return_value=response) as request_mock):
+                common.download("https://example.invalid/artifact", root / "first", digest)
+                common.download("https://example.invalid/artifact", root / "second", digest)
+                self.assertEqual((root / "second").read_bytes(), payload)
+                self.assertEqual(request_mock.call_count, 1)
+                (cache / digest).write_bytes(b"corrupt")
+                with self.assertRaisesRegex(ValueError, "SHA256 mismatch"):
+                    common.download("https://example.invalid/artifact", root / "third", digest)
+                self.assertFalse((root / "third").exists())
+                self.assertFalse((cache / digest).exists())
+
+    def test_cache_resumes_partial_file_from_previous_job(self):
+        payload = b"artifact resumed across jobs"
+        digest = hashlib.sha256(payload).hexdigest()
+        offset = 8
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            cache = root / "cache"
+            cache.mkdir()
+            (cache / (digest + ".part")).write_bytes(payload[:offset])
+            response = FakeResponse(payload[offset:], status=206, headers={
+                "Content-Range": f"bytes {offset}-{len(payload) - 1}/{len(payload)}"})
+            with (mock.patch.dict(os.environ, {"DEBXIANG_DOWNLOAD_CACHE": str(cache)}),
+                  mock.patch.object(common, "request", return_value=response) as request_mock):
+                common.download("https://example.invalid/artifact", root / "result", digest)
+                request_mock.assert_called_once_with("https://example.invalid/artifact", offset=offset)
+                self.assertEqual((root / "result").read_bytes(), payload)
+
     def test_truncated_first_response_resumes_at_offset_and_verifies_sha256(self):
         payload = b"complete upstream artifact"
         first_length = 9

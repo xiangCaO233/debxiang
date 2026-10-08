@@ -51,6 +51,8 @@ def maintain(state, site, engine):
                 if shutil.disk_usage(state).free < 6 * 1024**3:
                     raise RuntimeError("At least 6 GiB free disk space required before building")
                 run(engine, "build", "--pull", "-t", "localhost/debxiang-builder:trixie", ROOT)
+                downloads = state / "downloads"
+                downloads.mkdir(exist_ok=True)
                 for component in pending:
                     try:
                         args = [engine, "run", "--rm"]
@@ -60,6 +62,7 @@ def maintain(state, site, engine):
                             args += ["--user", f"{os.getuid()}:{os.getgid()}"]
                         cpu_count = max(1, int(run("nproc", capture_output=True, text=True).stdout) * 60 // 100)
                         args += ["--cpus", str(cpu_count), "-v", f"{ROOT}:/work:ro", "-v", f"{transaction}:/transaction",
+                                 "-v", f"{downloads}:/downloads", "-e", "DEBXIANG_DOWNLOAD_CACHE=/downloads",
                                  "localhost/debxiang-builder:trixie", "python3", "/work/scripts/build.py",
                                  component, "--plan", "/transaction/plan.json", "--output", "/transaction/packages"]
                         run(*args)

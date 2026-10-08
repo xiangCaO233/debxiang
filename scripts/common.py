@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import tarfile
 import tempfile
@@ -52,6 +53,32 @@ def version(value):
 
 
 def download(url, target, sha256=None):
+    cache_root = os.environ.get("DEBXIANG_DOWNLOAD_CACHE")
+    if cache_root and sha256:
+        if not re.fullmatch(r"[a-fA-F0-9]{64}", sha256):
+            raise ValueError("Invalid download SHA256")
+        cache = Path(cache_root)
+        cache.mkdir(parents=True, exist_ok=True)
+        cached = cache / sha256.lower()
+        # Recheck on every use; the cache is never a trust source. Partial
+        # files survive a canceled build and resume in the next job.
+        actual = _download(url, cached, sha256.lower())
+        cached.touch()
+        shutil.copy2(cached, target)
+        entries = [p for p in cache.iterdir()
+                   if re.fullmatch(r"[a-f0-9]{64}(?:\.part)?", p.name) and p.is_file()]
+        total = sum(p.stat().st_size for p in entries)
+        for old in sorted(entries, key=lambda p: p.stat().st_mtime):
+            if total <= 1024**3:
+                break
+            if old != cached:
+                total -= old.stat().st_size
+                old.unlink()
+        return actual
+    return _download(url, target, sha256)
+
+
+def _download(url, target, sha256=None):
     target = Path(target)
     if not target.exists():
         temporary = target.with_suffix(target.suffix + ".part")
