@@ -22,9 +22,9 @@ class PublishRecoveryTests(unittest.TestCase):
         self.site = self.root / "site"
         pool = self.site / "pool/main"
         pool.mkdir(parents=True)
-        self.package = pool / "uv_1.2.3-1_amd64.deb"
+        self.package = pool / "uv_1.2.3-100~debxiang1~trixie_amd64.deb"
         self.package.write_bytes(b"tiny deb fixture\n")
-        self.tag = "uv-1.2.3-1"
+        self.tag = "uv-1.2.3-100-debxiang1-trixie"
         self.checksum_name = self.package.name + ".sha256"
 
     def tearDown(self):
@@ -112,6 +112,7 @@ class PublishRecoveryTests(unittest.TestCase):
         creates = self._actions(calls, "create")
         self.assertEqual(len(creates), 1)
         self.assertEqual(creates[0][3], self.tag)
+        subprocess.run(["git", "check-ref-format", "refs/tags/" + creates[0][3]], check=True)
         self.assertEqual(Path(creates[0][4]), self.package)
         self.assertEqual(Path(creates[0][5]), self.site / "checksums" / self.checksum_name)
         self.assertEqual(self._actions(calls, "upload"), [])
