@@ -1,6 +1,7 @@
 """One serialized polling/build/signing transaction on a persistent runner."""
 import argparse
 import fcntl
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -42,6 +43,14 @@ def maintain(state, site, engine):
                    or not all((state / "pool" / f"{pkg}_{package_version(data)}_amd64.deb").is_file()
                               for pkg in PACKAGES[name])]
         print("Pending components:", ", ".join(pending) or "none", flush=True)
+        deployed = state / "deployed-manifest.sha256"
+        if (os.environ.get("GITHUB_OUTPUT") and not pending and not failures
+                and manifest_file.exists() and deployed.exists()
+                and hashlib.sha256(manifest_file.read_bytes()).hexdigest() == deployed.read_text().strip()):
+            with open(os.environ["GITHUB_OUTPUT"], "a") as output_file:
+                output_file.write("failures_count=0\nchanged=false\n")
+            print("No upstream changes since the last successful deployment", flush=True)
+            return []
         with tempfile.TemporaryDirectory(prefix="transaction-", dir=state) as temporary:
             transaction = Path(temporary)
             (transaction / "plan.json").write_text(json.dumps(plan, indent=2))
@@ -117,6 +126,8 @@ def maintain(state, site, engine):
             if os.environ.get("GITHUB_OUTPUT"):
                 with open(os.environ["GITHUB_OUTPUT"], "a") as output_file:
                     output_file.write(f"failures_count={len(failures)}\n")
+                    output_file.write("changed=true\n")
+                    output_file.write("manifest_sha256=" + hashlib.sha256(manifest_file.read_bytes()).hexdigest() + "\n")
             print("APT signing key:", fingerprint, flush=True)
             print("Repository prepared:", site, flush=True)
             return failures

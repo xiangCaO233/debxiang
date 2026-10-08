@@ -17,6 +17,8 @@ jobs:
     runs-on: [self-hosted, Linux, X64, debxiang]
     outputs:
       failures_count: ${{ steps.maintain.outputs.failures_count }}
+      changed: ${{ steps.maintain.outputs.changed }}
+      manifest_sha256: ${{ steps.maintain.outputs.manifest_sha256 }}
     timeout-minutes: 180
     defaults:
       run:
@@ -34,15 +36,19 @@ jobs:
           set -euo pipefail
           python3 scripts/maintain.py --state "$DEBXIANG_STATE" --site "$RUNNER_TEMP/debxiang-site"
       - name: Publish package downloads
+        if: steps.maintain.outputs.changed == 'true'
         run: |
           set -euo pipefail
           python3 scripts/publish.py --site "$RUNNER_TEMP/debxiang-site"
       - uses: actions/configure-pages@v5
+        if: steps.maintain.outputs.changed == 'true'
       - uses: actions/upload-pages-artifact@v3
+        if: steps.maintain.outputs.changed == 'true'
         with:
           path: ${{ runner.temp }}/debxiang-site
   deploy:
     needs: packages
+    if: needs.packages.outputs.changed == 'true'
     runs-on: [self-hosted, Linux, X64, debxiang]
     environment:
       name: github-pages
@@ -51,6 +57,10 @@ jobs:
       - name: Deploy signed APT repository
         id: deployment
         uses: actions/deploy-pages@v4
+      - name: Remember successfully deployed package manifest
+        run: |
+          printf '%s\n' '${{ needs.packages.outputs.manifest_sha256 }}' > /home/xiang/.local/state/debxiang/deployed-manifest.sha256.tmp
+          mv /home/xiang/.local/state/debxiang/deployed-manifest.sha256.tmp /home/xiang/.local/state/debxiang/deployed-manifest.sha256
       - name: Report failed components after publishing verified updates
         if: needs.packages.outputs.failures_count != '0'
         run: |

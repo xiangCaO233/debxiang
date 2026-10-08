@@ -326,7 +326,9 @@ class SignedRepositoryTests(unittest.TestCase):
             self.assertEqual(len(failures), 2)
             self.assertTrue(any(item.startswith("zig discovery:") for item in failures))
             self.assertTrue(any(item.startswith("ghostty discovery:") for item in failures))
-            self.assertEqual(github_output.read_text(), "failures_count=2\n")
+            self.assertIn("failures_count=2\nchanged=true\n", github_output.read_text())
+            self.assertIn("manifest_sha256=" + hashlib.sha256((state / "manifest.json").read_bytes()).hexdigest(),
+                          github_output.read_text())
 
             packages = (site / "dists/trixie/main/binary-amd64/Packages").read_text()
             self.assertEqual(self._field(packages, "Package"), "uv")
@@ -338,6 +340,39 @@ class SignedRepositoryTests(unittest.TestCase):
             self.assertEqual(json.loads((site / "manifest.json").read_text()), previous_manifest)
             self.assertEqual(json.loads((site / "failures.json").read_text()), failures)
             self.assertTrue(package.is_file())
+
+    def test_unchanged_deployment_skips_upload_but_failed_deployment_retries(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            state = root / "state"
+            pool = state / "pool"
+            pool.mkdir(parents=True)
+            metadata = {"version": "1.2.3", "sha256": "0" * 64,
+                        "deb_version": deb_version("1.2.3")}
+            self._build_fixture(root / "package-root", pool / f"uv_{metadata['deb_version']}_amd64.deb",
+                                name="uv", version=metadata["deb_version"])
+            manifest = state / "manifest.json"
+            manifest.write_text(json.dumps({"uv": metadata}) + "\n")
+            deployed = state / "deployed-manifest.sha256"
+            deployed.write_text(hashlib.sha256(manifest.read_bytes()).hexdigest() + "\n")
+            output = root / "github-output"
+            site = root / "site"
+            with (mock.patch.object(maintain_script, "DISCOVERERS", {"uv": lambda: metadata}),
+                  mock.patch.object(maintain_script, "run", side_effect=AssertionError("No container needed")),
+                  mock.patch.object(maintain_script, "make_repository", wraps=make_repository) as sign,
+                  mock.patch.dict(os.environ, {"GITHUB_OUTPUT": str(output)})):
+                self.assertEqual(maintain_script.maintain(state, site, "podman"), [])
+                self.assertEqual(output.read_text(), "failures_count=0\nchanged=false\n")
+                sign.assert_not_called()
+                self.assertFalse(site.exists())
+                # A changed state with no successful deployment must retry
+                # publication even when every package is already built.
+                deployed.write_text("0" * 64 + "\n")
+                output.write_text("")
+                self.assertEqual(maintain_script.maintain(state, site, "podman"), [])
+                self.assertIn("changed=true\n", output.read_text())
+                sign.assert_called_once()
+                self.assertTrue((site / "dists/trixie/InRelease").is_file())
 
 
 if __name__ == "__main__":

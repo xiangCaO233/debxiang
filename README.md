@@ -8,6 +8,7 @@
 
 - 新仓库的独立自托管 runner 位于 `xiang@xiang233.top:22022`，标签为 `self-hosted, Linux, X64, debxiang`。不使用 MusicMapMaker 的工作目录、凭据或 runner 注册信息。
 - GitHub Actions 每小时第 23 分钟检查上游，也可手动触发。cron 是定时轮询，通常一小时内发现更新，GitHub 调度可能延迟；公共仓库长期无活动时可能禁用 schedule，需要重新启用。
+- 版本与最近一次成功部署完全相同时跳过制品上传和 Pages 部署；首次部署及失败后的重试会正常发布。
 - uv 查询 GitHub 最新稳定 release，并校验上游 SHA256。Zig 查询官方 download index，跳过 master；下载校验官方 SHA256。Ghostty 从稳定版本标签发现更新，使用官网源码包并校验 minisign 签名。
 - ChatGPT 从 OpenAI 官方签名 APT 仓库发现更新：固定公钥主指纹，验证 InRelease，再校验 Packages 索引和 `.deb` 的 SHA256/大小。原字节镜像官方 `.deb`，保留厂商版本、许可、依赖和安装脚本。同版本上游 SHA256 变化会报错并保留旧包。
 - Ghostty 从当前源码读取精确 Zig 版本，单独下载校验，先获取依赖缓存再使用 `--system` 编译。安装完整桌面资源，ELF 动态依赖由 `dpkg-shlibdeps` 生成。
