@@ -5,7 +5,30 @@ import hashlib
 import json
 from pathlib import Path
 import shutil
+from functools import cmp_to_key
 from common import run
+
+
+def prune_packages(pool, keep=3):
+    """Bound Pages storage; older versions remain in GitHub Releases."""
+    groups = {}
+    for path in pool.glob("*.deb"):
+        name = run("dpkg-deb", "--field", path, "Package", capture_output=True, text=True).stdout.strip()
+        package_version = run("dpkg-deb", "--field", path, "Version", capture_output=True, text=True).stdout.strip()
+        groups.setdefault(name, []).append((package_version, path))
+
+    def compare(a, b):
+        import subprocess
+        if a[0] == b[0]:
+            return 0
+        result = subprocess.run(["dpkg", "--compare-versions", a[0], "gt", b[0]], check=False)
+        if result.returncode not in (0, 1):
+            raise ValueError("Invalid Debian package version")
+        return -1 if result.returncode == 0 else 1
+
+    for group in groups.values():
+        for _, path in sorted(group, key=cmp_to_key(compare))[keep:]:
+            path.unlink()
 
 
 def signing_key(state):

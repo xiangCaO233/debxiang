@@ -16,7 +16,7 @@ sys.path.insert(0, str(REPOSITORY_ROOT / "scripts"))
 from build import required_zig  # noqa: E402
 from common import extract  # noqa: E402
 from discover import latest_tag  # noqa: E402
-from repository import make_repository  # noqa: E402
+from repository import make_repository, prune_packages  # noqa: E402
 
 
 class DiscoveryTests(unittest.TestCase):
@@ -118,21 +118,21 @@ class SignedRepositoryTests(unittest.TestCase):
             raise unittest.SkipTest("missing repository test tools: " + ", ".join(missing))
 
     @staticmethod
-    def _build_fixture(package_root, target):
+    def _build_fixture(package_root, target, name="fixture-tool", version="1.2.3-1"):
         control = package_root / "DEBIAN/control"
         control.parent.mkdir(parents=True)
         control.write_text(
-            "Package: fixture-tool\n"
-            "Version: 1.2.3-1\n"
+            f"Package: {name}\n"
+            f"Version: {version}\n"
             "Architecture: amd64\n"
             "Maintainer: Tests <tests@example.invalid>\n"
             "Section: utils\n"
             "Priority: optional\n"
             "Description: real package fixture for repository tests\n"
         )
-        executable = package_root / "usr/bin/fixture-tool"
+        executable = package_root / "usr/bin" / name
         executable.parent.mkdir(parents=True)
-        executable.write_text("#!/bin/sh\nprintf '%s\\n' fixture-tool\n")
+        executable.write_text(f"#!/bin/sh\nprintf '%s\\n' {name}-{version}\n")
         executable.chmod(0o755)
         subprocess.run(
             ["dpkg-deb", "--root-owner-group", "--build", str(package_root), str(target)],
@@ -217,6 +217,54 @@ class SignedRepositoryTests(unittest.TestCase):
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
             )
+
+    def test_prune_packages_keeps_latest_three_versions_per_package(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            pool = root / "pool"
+            pool.mkdir()
+            versions = {
+                "numeric-order": ("1.8-1", "1.9-1", "1.10-1", "2.0-1"),
+                "independent": ("3.0-1", "3.1-1", "3.2-1", "3.3-1"),
+                "short-history": ("7.0-1", "7.1-1"),
+            }
+            expected = {
+                "numeric-order": {"1.9-1", "1.10-1", "2.0-1"},
+                "independent": {"3.1-1", "3.2-1", "3.3-1"},
+                "short-history": {"7.0-1", "7.1-1"},
+            }
+
+            fixture_number = 0
+            for name, package_versions in versions.items():
+                for version in package_versions:
+                    fixture_number += 1
+                    package = pool / f"{name}_{version}_amd64.deb"
+                    self._build_fixture(
+                        root / f"package-root-{fixture_number}",
+                        package,
+                        name=name,
+                        version=version,
+                    )
+
+            prune_packages(pool, keep=3)
+
+            retained = {}
+            for package in pool.glob("*.deb"):
+                name = subprocess.run(
+                    ["dpkg-deb", "--field", str(package), "Package"],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                ).stdout.strip()
+                version = subprocess.run(
+                    ["dpkg-deb", "--field", str(package), "Version"],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                ).stdout.strip()
+                retained.setdefault(name, set()).add(version)
+
+            self.assertEqual(retained, expected)
 
 
 if __name__ == "__main__":

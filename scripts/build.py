@@ -108,8 +108,19 @@ def build(component, metadata, output):
         elif component == "zig":
             zig_home = root / "usr/lib/zig" / upstream
             shutil.copytree(source, zig_home)
-            # Absolute package symlink makes Zig find its standard library.
-            (root / "usr/bin/zig").symlink_to(f"../lib/zig/{upstream}/zig")
+            # Match Griffo's alternatives mechanism so zig-oldstable can
+            # coexist, and upgrading removes the old provider correctly.
+            scripts = root / "DEBIAN"
+            scripts.mkdir()
+            zig_path = f"/usr/lib/zig/{upstream}/zig"
+            (scripts / "postinst").write_text(
+                '#!/bin/sh\nset -e\nif [ "$1" = configure ]; then\n'
+                f'    update-alternatives --install /usr/bin/zig zig {zig_path} 100\nfi\n')
+            (scripts / "prerm").write_text(
+                '#!/bin/sh\nset -e\ncase "$1" in remove|upgrade|deconfigure)\n'
+                f'    update-alternatives --remove zig {zig_path}\n;; esac\n')
+            for script in ("postinst", "prerm"):
+                (scripts / script).chmod(0o755)
             add_copyright(root, "zig-stable", source, "https://ziglang.org")
             run(zig_home / "zig", "version")
             control(root, "zig-stable", upstream, "", "Zig stable compiler and standard library")

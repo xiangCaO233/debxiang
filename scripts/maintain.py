@@ -9,7 +9,7 @@ import tempfile
 from build import deb_version
 from common import run
 from discover import discover
-from repository import make_repository
+from repository import make_repository, prune_packages
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGES = {"uv": ["uv"], "zig": ["zig", "zig-stable"], "ghostty": ["ghostty"]}
@@ -66,8 +66,11 @@ def maintain(state, site, engine):
                 pool.mkdir()
             for artifact in output.glob("*.deb"):
                 shutil.copy2(artifact, pool / artifact.name)
-            # Keep all published versions: apt clients holding older indexes
-            # must still be able to download those exact filenames.
+            # Keep three recent versions for clients with older indexes.
+            # Unlimited history belongs in Releases, not the Pages site.
+            prune_packages(pool)
+            if sum(p.stat().st_size for p in pool.glob("*.deb")) > 900 * 1024**2:
+                raise RuntimeError("APT package pool exceeds the 900 MiB Pages budget")
             manifest = dict(previous)
             for component in pending:
                 manifest[component] = dict(plan[component], deb_version=deb_version(plan[component]["version"]))
@@ -78,6 +81,7 @@ def maintain(state, site, engine):
             (state / "pool").mkdir(exist_ok=True)
             for artifact in output.glob("*.deb"):
                 shutil.copy2(artifact, state / "pool" / artifact.name)
+            prune_packages(state / "pool")
             temporary_manifest = state / "manifest.json.tmp"
             temporary_manifest.write_text(json.dumps(manifest, indent=2) + "\n")
             temporary_manifest.replace(manifest_file)
