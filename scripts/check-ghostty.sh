@@ -23,7 +23,7 @@ sed -i 's/^Version:.*/Version: 0.0.0-1/' /tmp/legacy-ghostty/DEBIAN/control
 [ ! -e /tmp/legacy-ghostty/usr/share/terminfo/g/ghostty ]
 [ ! -L /tmp/legacy-ghostty/usr/share/terminfo/g/ghostty ]
 dpkg-deb --root-owner-group --build /tmp/legacy-ghostty /tmp/legacy-ghostty.deb
-apt-get install --no-install-recommends -y /tmp/legacy-ghostty.deb
+apt-get install --allow-downgrades --no-install-recommends -y /tmp/legacy-ghostty.deb
 apt-get install --no-install-recommends -y "$package"
 [ "$before" = "$(sha256sum "$alias")" ]
 dpkg-query -S "$alias"
