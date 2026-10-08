@@ -1,0 +1,223 @@
+import gzip
+import hashlib
+import io
+from pathlib import Path
+import shutil
+import subprocess
+import sys
+import tarfile
+import tempfile
+import unittest
+
+
+REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPOSITORY_ROOT / "scripts"))
+
+from build import required_zig  # noqa: E402
+from common import extract  # noqa: E402
+from discover import latest_tag  # noqa: E402
+from repository import make_repository  # noqa: E402
+
+
+class DiscoveryTests(unittest.TestCase):
+    def test_latest_tag_selects_highest_stable_semver(self):
+        tags = [
+            {"name": "tip"},
+            {"name": "v1.9.9"},
+            {"name": "1.10.0"},
+            {"name": "v2.0.0-beta.1"},
+            {"name": "release-99.0.0"},
+        ]
+
+        self.assertEqual(latest_tag(tags), "1.10.0")
+
+    def test_latest_tag_rejects_list_without_stable_release(self):
+        with self.assertRaisesRegex(ValueError, "No stable Ghostty tag"):
+            latest_tag([{"name": "tip"}, {"name": "v1.2.3-rc1"}])
+
+
+class RequiredZigTests(unittest.TestCase):
+    def test_zon_version_takes_precedence(self):
+        build_zig = 'const required_zig = "0.13.0";'
+        zon = '.{ .minimum_zig_version = "0.15.2", }'
+
+        self.assertEqual(required_zig(build_zig, zon), "0.15.2")
+
+    def test_parses_legacy_string_constant(self):
+        build_zig = (
+            'const required_zig = '
+            'std.SemanticVersion.parse("0.14.1") catch unreachable;'
+        )
+
+        self.assertEqual(required_zig(build_zig), "0.14.1")
+
+    def test_parses_legacy_semantic_version_struct(self):
+        build_zig = """
+            const required_zig: std.SemanticVersion = .{
+                .major = 0,
+                .minor = 13,
+                .patch = 0,
+            };
+        """
+
+        self.assertEqual(required_zig(build_zig), "0.13.0")
+
+    def test_rejects_missing_or_non_release_version(self):
+        with self.assertRaisesRegex(ValueError, "Cannot determine"):
+            required_zig("const something_else = true;", '.{ .minimum_zig_version = "master", }')
+
+
+class ArchiveSafetyTests(unittest.TestCase):
+    def test_extract_rejects_parent_path_escape(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            temporary_path = Path(temporary)
+            archive = temporary_path / "malicious.tar.gz"
+            destination = temporary_path / "destination"
+            escaped = temporary_path / "escaped.txt"
+            with tarfile.open(archive, "w:gz") as tar:
+                safe = tarfile.TarInfo("package/README")
+                safe_data = b"safe\n"
+                safe.size = len(safe_data)
+                tar.addfile(safe, io.BytesIO(safe_data))
+
+                traversal = tarfile.TarInfo("../escaped.txt")
+                traversal_data = b"escaped\n"
+                traversal.size = len(traversal_data)
+                tar.addfile(traversal, io.BytesIO(traversal_data))
+
+            with self.assertRaises(tarfile.FilterError):
+                extract(archive, destination)
+            self.assertFalse(escaped.exists())
+
+    def test_extract_rejects_symlink_escape(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            temporary_path = Path(temporary)
+            archive = temporary_path / "malicious-link.tar.gz"
+            destination = temporary_path / "destination"
+            with tarfile.open(archive, "w:gz") as tar:
+                root = tarfile.TarInfo("package")
+                root.type = tarfile.DIRTYPE
+                tar.addfile(root)
+
+                link = tarfile.TarInfo("package/outside")
+                link.type = tarfile.SYMTYPE
+                link.linkname = "../../outside"
+                tar.addfile(link)
+
+            with self.assertRaises(tarfile.FilterError):
+                extract(archive, destination)
+
+
+class SignedRepositoryTests(unittest.TestCase):
+    required_tools = ("dpkg-deb", "apt-ftparchive", "gpg")
+
+    @classmethod
+    def setUpClass(cls):
+        missing = [tool for tool in cls.required_tools if shutil.which(tool) is None]
+        if missing:
+            raise unittest.SkipTest("missing repository test tools: " + ", ".join(missing))
+
+    @staticmethod
+    def _build_fixture(package_root, target):
+        control = package_root / "DEBIAN/control"
+        control.parent.mkdir(parents=True)
+        control.write_text(
+            "Package: fixture-tool\n"
+            "Version: 1.2.3-1\n"
+            "Architecture: amd64\n"
+            "Maintainer: Tests <tests@example.invalid>\n"
+            "Section: utils\n"
+            "Priority: optional\n"
+            "Description: real package fixture for repository tests\n"
+        )
+        executable = package_root / "usr/bin/fixture-tool"
+        executable.parent.mkdir(parents=True)
+        executable.write_text("#!/bin/sh\nprintf '%s\\n' fixture-tool\n")
+        executable.chmod(0o755)
+        subprocess.run(
+            ["dpkg-deb", "--root-owner-group", "--build", str(package_root), str(target)],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+
+    @staticmethod
+    def _field(stanza, name):
+        prefix = name + ": "
+        return next(line.removeprefix(prefix) for line in stanza.splitlines() if line.startswith(prefix))
+
+    def test_real_package_signed_repository_and_stable_key(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            pool = root / "input-pool"
+            pool.mkdir()
+            package = pool / "fixture-tool_1.2.3-1_amd64.deb"
+            self._build_fixture(root / "package-root", package)
+
+            state = root / "state"
+            state.mkdir()
+            manifest = {"fixture-tool": {"version": "1.2.3"}}
+            first_site = root / "site-first"
+            second_site = root / "site-second"
+            first_fingerprint = make_repository(pool, first_site, state, manifest)
+            second_fingerprint = make_repository(pool, second_site, state, manifest)
+
+            self.assertEqual(first_fingerprint, second_fingerprint)
+            self.assertRegex(first_fingerprint, r"^[0-9A-F]{40}$")
+            self.assertEqual((state / "signing-key.txt").read_text().strip(), first_fingerprint)
+
+            published = first_site / "pool/main" / package.name
+            package_digest = hashlib.sha256(published.read_bytes()).hexdigest()
+            packages_path = first_site / "dists/trixie/main/binary-amd64/Packages"
+            packages = packages_path.read_text()
+            self.assertEqual(self._field(packages, "Package"), "fixture-tool")
+            self.assertEqual(self._field(packages, "Filename"), f"pool/main/{package.name}")
+            self.assertEqual(self._field(packages, "SHA256"), package_digest)
+
+            with gzip.open(packages_path.with_suffix(".gz"), "rb") as compressed:
+                self.assertEqual(compressed.read(), packages_path.read_bytes())
+
+            sums = (first_site / "SHA256SUMS").read_text().splitlines()
+            self.assertIn(f"{package_digest}  pool/main/{package.name}", sums)
+
+            verify_home = root / "verify-gnupg"
+            verify_home.mkdir(mode=0o700)
+            subprocess.run(
+                ["gpg", "--homedir", str(verify_home), "--batch", "--import",
+                 str(first_site / "debxiang.asc")],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            imported = subprocess.run(
+                ["gpg", "--homedir", str(verify_home), "--with-colons", "--list-keys"],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            ).stdout
+            imported_fingerprints = [
+                line.split(":")[9] for line in imported.splitlines() if line.startswith("fpr:")
+            ]
+            self.assertIn(first_fingerprint, imported_fingerprints)
+
+            release = first_site / "dists/trixie/Release"
+            subprocess.run(
+                ["gpg", "--homedir", str(verify_home), "--batch", "--verify",
+                 str(release.with_suffix(".gpg")), str(release)],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            subprocess.run(
+                ["gpg", "--homedir", str(verify_home), "--batch", "--verify",
+                 str(release.parent / "InRelease")],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+
+if __name__ == "__main__":
+    unittest.main()

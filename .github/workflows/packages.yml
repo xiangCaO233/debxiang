@@ -1,0 +1,50 @@
+name: Maintain Debian packages
+on:
+  schedule:
+    - cron: '23 * * * *'
+  workflow_dispatch:
+  push:
+    branches: [main]
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+concurrency:
+  group: debxiang-publish
+  cancel-in-progress: false
+jobs:
+  packages:
+    runs-on: [self-hosted, Linux, X64, debxiang]
+    timeout-minutes: 180
+    defaults:
+      run:
+        shell: bash
+    env:
+      GH_TOKEN: ${{ github.token }}
+      DEBXIANG_STATE: /home/xiang/.local/state/debxiang
+    steps:
+      - uses: actions/checkout@v6
+      - name: Verify scripts
+        run: python3 -m unittest discover -s tests -v
+      - name: Check upstream, build and sign repository
+        run: |
+          set -euo pipefail
+          python3 scripts/maintain.py --state "$DEBXIANG_STATE" --site "$RUNNER_TEMP/debxiang-site"
+      - name: Publish package downloads
+        run: |
+          set -euo pipefail
+          python3 scripts/publish.py --site "$RUNNER_TEMP/debxiang-site"
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: ${{ runner.temp }}/debxiang-site
+  deploy:
+    needs: packages
+    runs-on: [self-hosted, Linux, X64, debxiang]
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy signed APT repository
+        id: deployment
+        uses: actions/deploy-pages@v4
