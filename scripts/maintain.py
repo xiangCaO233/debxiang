@@ -88,9 +88,10 @@ def maintain(state, site, engine):
                         if component == "ghostty":
                             # Cover both our target release and newer Debian
                             # systems where ncurses-term already owns the alias.
+                            previous_pool = state / "pool" if (state / "pool").is_dir() else output
                             for suite in ("trixie", "sid"):
                                 run(engine, "run", "--rm", "-v", f"{output}:/packages:ro",
-                                    "-v", f"{ROOT}:/work:ro", "-v", f"{state / 'pool'}:/previous:ro",
+                                    "-v", f"{ROOT}:/work:ro", "-v", f"{previous_pool}:/previous:ro",
                                     "debian:" + suite,
                                     "sh", "/work/scripts/check-ghostty.sh")
                         else:
