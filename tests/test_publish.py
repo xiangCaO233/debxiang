@@ -1,4 +1,5 @@
 import json
+import hashlib
 import os
 from pathlib import Path
 import shutil
@@ -25,7 +26,8 @@ class PublishRecoveryTests(unittest.TestCase):
         self.package = pool / "uv_1.2.3-100~debxiang1~trixie_amd64.deb"
         self.package.write_bytes(b"tiny deb fixture\n")
         self.tag = "uv-1.2.3-100-debxiang1-trixie"
-        self.checksum_name = self.package.name + ".sha256"
+        self.asset_name = self.package.name.replace("~", ".")
+        self.checksum_name = self.asset_name + ".sha256"
 
     def tearDown(self):
         self.temporary.cleanup()
@@ -51,16 +53,19 @@ class PublishRecoveryTests(unittest.TestCase):
                 destination = Path(args[args.index("--dir") + 1]) / pattern
                 if pattern == self.checksum_name:
                     if downloaded_checksum == "local":
-                        source = self.site / "checksums" / self.checksum_name
-                        shutil.copy2(source, destination)
+                        destination.write_text(hashlib.sha256(self.package.read_bytes()).hexdigest()
+                                               + "  " + self.asset_name + "\n")
                     else:
                         destination.write_text(downloaded_checksum)
-                elif pattern == self.package.name:
+                elif pattern == self.asset_name:
                     shutil.copy2(self.package, destination)
                 else:
                     self.fail(f"unexpected download pattern: {pattern}")
                 return subprocess.CompletedProcess(args, 0, stdout="")
             if action in ("upload", "create"):
+                for argument in args[4:]:
+                    if isinstance(argument, Path) and argument.suffix == ".deb":
+                        self.assertEqual(argument.read_bytes(), self.package.read_bytes())
                 return subprocess.CompletedProcess(args, 0, stdout="")
             self.fail(f"unexpected gh action: {action}")
 
@@ -80,7 +85,7 @@ class PublishRecoveryTests(unittest.TestCase):
         return [call for call in calls if call[2] == action]
 
     def test_existing_matching_package_and_checksum_uploads_nothing(self):
-        calls = self._publish_with({self.package.name, self.checksum_name})
+        calls = self._publish_with({self.asset_name, self.checksum_name})
 
         self.assertEqual(self._actions(calls, "upload"), [])
         self.assertEqual(self._actions(calls, "create"), [])
@@ -91,7 +96,7 @@ class PublishRecoveryTests(unittest.TestCase):
     def test_existing_wrong_checksum_raises_without_upload(self):
         with self.assertRaisesRegex(ValueError, "Published asset checksum differs"):
             self._publish_with(
-                {self.package.name, self.checksum_name},
+                {self.asset_name, self.checksum_name},
                 downloaded_checksum="0" * 64 + "  " + self.package.name + "\n",
             )
         self.assertEqual(self._actions(self.calls, "upload"), [])
@@ -102,7 +107,7 @@ class PublishRecoveryTests(unittest.TestCase):
 
         uploads = self._actions(calls, "upload")
         self.assertEqual(len(uploads), 1)
-        self.assertEqual(Path(uploads[0][4]), self.package)
+        self.assertEqual(Path(uploads[0][4]).name, self.asset_name)
         self.assertNotIn("--clobber", uploads[0])
         self.assertEqual(self._actions(calls, "create"), [])
 
@@ -113,11 +118,19 @@ class PublishRecoveryTests(unittest.TestCase):
         self.assertEqual(len(creates), 1)
         self.assertEqual(creates[0][3], self.tag)
         subprocess.run(["git", "check-ref-format", "refs/tags/" + creates[0][3]], check=True)
-        self.assertEqual(Path(creates[0][4]), self.package)
-        self.assertEqual(Path(creates[0][5]), self.site / "checksums" / self.checksum_name)
+        self.assertEqual(Path(creates[0][4]).name, self.asset_name)
+        self.assertEqual(Path(creates[0][5]).name, self.checksum_name)
+        self.assertNotIn(self.site, Path(creates[0][4]).parents)
         self.assertEqual(self._actions(calls, "upload"), [])
         self.assertEqual(self._actions(calls, "view"), [])
         self.assertEqual(self._actions(calls, "download"), [])
+
+    def test_github_renamed_asset_with_legacy_checksum_does_not_upload_again(self):
+        digest = hashlib.sha256(self.package.read_bytes()).hexdigest()
+        calls = self._publish_with({self.asset_name, self.checksum_name},
+                                   downloaded_checksum=digest + "  " + self.package.name + "\n")
+        self.assertEqual(self._actions(calls, "upload"), [])
+        self.assertEqual(self._actions(calls, "create"), [])
 
 
 if __name__ == "__main__":
