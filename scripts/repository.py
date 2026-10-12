@@ -27,7 +27,7 @@ def prune_packages(pool, keep=3):
         return -1 if result.returncode == 0 else 1
 
     for name, group in groups.items():
-        retained = 1 if name in ("chatgpt", "clash-verge") else keep
+        retained = 1 if name in ("chatgpt", "clash-verge", "codex-cli") else keep
         for _, path in sorted(group, key=cmp_to_key(compare))[retained:]:
             path.unlink()
 

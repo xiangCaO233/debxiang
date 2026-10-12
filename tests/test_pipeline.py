@@ -244,6 +244,7 @@ class SignedRepositoryTests(unittest.TestCase):
                 "short-history": ("7.0-1", "7.1-1"),
                 "chatgpt": ("26.902.1", "26.1002.1"),
                 "clash-verge": ("2.5.7", "2.5.8"),
+                "codex-cli": ("0.161.0-100~debxiang1~trixie", "0.162.1-100~debxiang1~trixie"),
             }
             expected = {
                 "numeric-order": {"1.9-1", "1.10-1", "2.0-1"},
@@ -251,6 +252,7 @@ class SignedRepositoryTests(unittest.TestCase):
                 "short-history": {"7.0-1", "7.1-1"},
                 "chatgpt": {"26.1002.1"},
                 "clash-verge": {"2.5.8"},
+                "codex-cli": {"0.162.1-100~debxiang1~trixie"},
             }
 
             fixture_number = 0

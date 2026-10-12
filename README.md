@@ -75,7 +75,7 @@ sudo apt install codex-cli
 codex
 ```
 
-首次运行按提示登录。软件包保留上游随附工具和资源，更新通过 APT 获取。
+首次运行按提示登录。软件包保留上游随附工具和资源，更新通过 APT 获取；软件源里只保留 Codex CLI 最新版。
 
 ## Clash Verge Rev
 
