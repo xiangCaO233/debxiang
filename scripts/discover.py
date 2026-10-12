@@ -3,6 +3,8 @@ import json
 import re
 from common import get_json, version
 from openai_package import discover_chatgpt
+from codex_package import discover_codex
+from clash_package import discover_clash
 
 
 def latest_tag(tags):
@@ -44,7 +46,7 @@ def discover_ghostty():
 
 
 DISCOVERERS = {"uv": discover_uv, "zig": discover_zig, "ghostty": discover_ghostty,
-              "chatgpt": discover_chatgpt}
+              "chatgpt": discover_chatgpt, "codex-cli": discover_codex, "clash-verge": discover_clash}
 
 
 def discover():

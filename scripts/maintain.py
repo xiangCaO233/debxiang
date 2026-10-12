@@ -14,7 +14,7 @@ from discover import DISCOVERERS
 from repository import make_repository, prune_packages
 
 ROOT = Path(__file__).resolve().parents[1]
-PACKAGES = {"uv": ["uv"], "zig": ["zig", "zig-stable"], "ghostty": ["ghostty"], "chatgpt": ["chatgpt"]}
+PACKAGES = {"uv": ["uv"], "zig": ["zig", "zig-stable"], "ghostty": ["ghostty"], "chatgpt": ["chatgpt"], "codex-cli": ["codex-cli"], "clash-verge": ["clash-verge"]}
 
 
 def maintain(state, site, engine):
@@ -84,7 +84,7 @@ def maintain(state, site, engine):
                         pattern = "zig" if component == "zig" else component
                         command = ("apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends -y /packages/" + pattern + "_*.deb " +
                                    ("/packages/zig-stable_*.deb " if component == "zig" else "") +
-                                   "&& " + {"uv": "uv --version && uvx --version", "zig": "zig version && printf 'pub fn main() void {}' > /tmp/smoke.zig && zig build-exe /tmp/smoke.zig -femit-bin=/tmp/smoke && /tmp/smoke", "ghostty": "ghostty +version", "chatgpt": "dpkg-query -W chatgpt && test -x /usr/bin/chatgpt"}[component])
+                                   "&& " + {"uv": "uv --version && uvx --version", "zig": "zig version && printf 'pub fn main() void {}' > /tmp/smoke.zig && zig build-exe /tmp/smoke.zig -femit-bin=/tmp/smoke && /tmp/smoke", "ghostty": "ghostty +version", "chatgpt": "dpkg-query -W chatgpt && test -x /usr/bin/chatgpt", "clash-verge": "dpkg-query -W clash-verge && test -x /usr/bin/clash-verge && ldd /usr/bin/clash-verge > /tmp/clash-ldd && ! grep -q 'not found' /tmp/clash-ldd", "codex-cli": "codex --version && codex --help >/dev/null && codex completion bash >/dev/null && /usr/lib/codex-cli/codex-path/rg --version && /usr/lib/codex-cli/codex-resources/bwrap --version && ldd /usr/lib/codex-cli/codex-resources/voice/bin/codex-voice-host > /tmp/codex-voice-ldd && ! grep -q 'not found' /tmp/codex-voice-ldd"}[component])
                         if component == "ghostty":
                             # Cover both our target release and newer Debian
                             # systems where ncurses-term already owns the alias.
@@ -95,8 +95,12 @@ def maintain(state, site, engine):
                                     "debian:" + suite,
                                     "sh", "/work/scripts/check-ghostty.sh")
                         else:
-                            run(engine, "run", "--rm", "-v", f"{output}:/packages:ro", "debian:trixie",
-                                "sh", "-ec", command)
+                            suites = ("trixie", "sid") if component in ("codex-cli", "clash-verge") else ("trixie",)
+                            if component == "codex-cli":
+                                command = "apt-get update && apt-get install --no-install-recommends -y ripgrep && " + command
+                            for suite in suites:
+                                run(engine, "run", "--rm", "-v", f"{output}:/packages:ro", "debian:" + suite,
+                                    "sh", "-ec", command)
                         completed.append(component)
                     except Exception as error:
                         failures.append(f"{component} build/install: {error}")

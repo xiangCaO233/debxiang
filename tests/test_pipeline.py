@@ -243,12 +243,14 @@ class SignedRepositoryTests(unittest.TestCase):
                 "independent": ("3.0-1", "3.1-1", "3.2-1", "3.3-1"),
                 "short-history": ("7.0-1", "7.1-1"),
                 "chatgpt": ("26.902.1", "26.1002.1"),
+                "clash-verge": ("2.5.7", "2.5.8"),
             }
             expected = {
                 "numeric-order": {"1.9-1", "1.10-1", "2.0-1"},
                 "independent": {"3.1-1", "3.2-1", "3.3-1"},
                 "short-history": {"7.0-1", "7.1-1"},
                 "chatgpt": {"26.1002.1"},
+                "clash-verge": {"2.5.8"},
             }
 
             fixture_number = 0

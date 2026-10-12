@@ -1,6 +1,6 @@
 # debxiang
 
-免费的 Debian APT 软件源，提供 uv、Zig、Ghostty，以及 [OpenAI 官方 ChatGPT Linux 客户端](https://learn.chatgpt.com/docs/linux/linux-app)。自动跟踪上游稳定版，无需软件下载订阅。
+免费的 Debian APT 软件源，提供 uv、Zig、Ghostty、[Codex CLI](https://github.com/openai/codex)、[Clash Verge Rev](https://github.com/clash-verge-rev/clash-verge-rev)，以及 [OpenAI 官方 ChatGPT Linux 客户端](https://learn.chatgpt.com/docs/linux/linux-app)。自动跟踪上游稳定版，无需软件下载订阅。
 
 支持 **Debian 13（trixie）、amd64 / x86_64**。
 
@@ -10,6 +10,8 @@
 | `zig` | 安装最新稳定版 Zig，自动依赖 `zig-stable` |
 | `zig-stable` | Zig 编译器和标准库 |
 | `ghostty` | Ghostty 桌面终端 |
+| `codex-cli` | OpenAI Codex 终端编程助手，命令为 `codex` |
+| `clash-verge` | Clash Verge Rev，GitHub 最新正式 Release 的原始 DEB |
 | `chatgpt` | 官方 ChatGPT Linux 客户端，保留原始安装包 |
 
 ## 添加软件源
@@ -52,19 +54,36 @@ sudo apt update
 按需安装，也可以一次安装全部工具：
 
 ```bash
-sudo apt install uv zig ghostty chatgpt
+sudo apt install uv zig ghostty chatgpt codex-cli clash-verge
 ```
 
 检查和安装后续更新：
 
 ```bash
 sudo apt update
-sudo apt install --only-upgrade uv zig zig-stable ghostty chatgpt
+sudo apt install --only-upgrade uv zig zig-stable ghostty chatgpt codex-cli clash-verge
 ```
 
 APT 不会自动将已安装的软件降级。如果索引过旧导致下载失败，先运行 `sudo apt update` 再重试。
 
 Ghostty 和 ChatGPT 安装后可从应用菜单启动，也可以在终端运行 `ghostty` 或 `chatgpt`。
+
+安装 Codex CLI：
+
+```bash
+sudo apt install codex-cli
+codex
+```
+
+首次运行按提示登录。软件包保留上游随附工具和资源，更新通过 APT 获取。
+
+## Clash Verge Rev
+
+```bash
+sudo apt install clash-verge
+```
+
+安装后从应用菜单启动 Clash Verge Rev。包名为 `clash-verge`，直接提供 GitHub 最新正式 Release 的 amd64 DEB，不重新编译或修改原包；软件源里只保留最新版。
 
 ## ChatGPT 客户端
 

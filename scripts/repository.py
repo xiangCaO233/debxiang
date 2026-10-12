@@ -27,7 +27,7 @@ def prune_packages(pool, keep=3):
         return -1 if result.returncode == 0 else 1
 
     for name, group in groups.items():
-        retained = 1 if name == "chatgpt" else keep
+        retained = 1 if name in ("chatgpt", "clash-verge") else keep
         for _, path in sorted(group, key=cmp_to_key(compare))[retained:]:
             path.unlink()
 
@@ -87,7 +87,7 @@ def make_repository(pool, site, state, manifest):
     (site / "SHA256SUMS").write_text("\n".join(sums) + "\n")
     (site / "index.html").write_text(
         '<!doctype html><meta charset="utf-8"><title>debxiang APT repository</title>'
-        '<h1>debxiang</h1><p>Debian trixie / amd64: uv, zig, zig-stable, ghostty, chatgpt.</p>'
+        '<h1>debxiang</h1><p>Debian trixie / amd64: uv, zig, zig-stable, ghostty, chatgpt, codex-cli, clash-verge.</p>'
         '<p><a href="debxiang.asc">APT signing key</a> · '
         '<a href="manifest.json">Build manifest</a> · <a href="SHA256SUMS">Checksums</a></p>'
         '<p>Signing key fingerprint: <code>' + key + '</code></p>')

@@ -6,6 +6,7 @@ from pathlib import Path
 import re
 import shutil
 import tempfile
+from codex_package import install_codex_bundle
 from common import download, extract, get_json, request, run, version
 
 GHOSTTY_KEY = "RWQlAjJC23149WL2sEpT/l0QKy7hMIFhYdQOFy0Z7z7PbneUgvlsnYcV"
@@ -40,11 +41,16 @@ def package(root, name, upstream, output):
     return target
 
 
-def runtime_dependencies(root, binary):
+def runtime_dependencies(root, binary, private_dirs=()):
     # dpkg-shlibdeps needs a minimal Debian source context.
     (root / "debian").mkdir()
     (root / "debian/control").write_text("Source: debxiang\n\nPackage: debxiang\nArchitecture: any\n")
-    result = run("dpkg-shlibdeps", "-O", "-e" + str(binary), cwd=root, capture_output=True, text=True)
+    options = ["-l" + str(directory) for directory in private_dirs]
+    if private_dirs:
+        options.append("--ignore-missing-info")
+    binaries = binary if isinstance(binary, (list, tuple)) else (binary,)
+    result = run("dpkg-shlibdeps", "-O", *options, *("-e" + str(path) for path in binaries),
+                 cwd=root, capture_output=True, text=True)
     shutil.rmtree(root / "debian")
     return next(line.split("=", 1)[1] for line in result.stdout.splitlines() if line.startswith("shlibs:Depends="))
 
@@ -77,20 +83,20 @@ def add_copyright(root, name, source, upstream_url):
 
 
 def build(component, metadata, output):
-    if component == "chatgpt":
+    if component in ("chatgpt", "clash-verge"):
         # Mirror the exact vendor package, including its licenses, control
         # fields and update hooks. Never relabel it as a locally built app.
-        with tempfile.TemporaryDirectory(prefix="debxiang-chatgpt-") as temporary:
-            original = Path(temporary) / "chatgpt.deb"
+        with tempfile.TemporaryDirectory(prefix="debxiang-vendor-") as temporary:
+            original = Path(temporary) / (component + ".deb")
             download(metadata["url"], original, metadata["sha256"])
-            expected = {"Package": "chatgpt", "Version": metadata["deb_version"], "Architecture": "amd64"}
+            expected = {"Package": component, "Version": metadata["deb_version"], "Architecture": "amd64"}
             for field, value in expected.items():
                 actual = run("dpkg-deb", "--field", original, field, capture_output=True, text=True).stdout.strip()
                 if actual != value:
-                    raise ValueError(f"Official ChatGPT {field} differs from signed metadata")
+                    raise ValueError(f"Official {component} {field} differs from upstream metadata")
             if original.stat().st_size != metadata["size"]:
-                raise ValueError("Official ChatGPT package size mismatch")
-            shutil.copy2(original, output / f"chatgpt_{metadata['deb_version']}_amd64.deb")
+                raise ValueError("Official vendor package size mismatch")
+            shutil.copy2(original, output / f"{component}_{metadata['deb_version']}_amd64.deb")
         return
     upstream = version(metadata["version"])
     with tempfile.TemporaryDirectory(prefix="debxiang-") as temporary:
@@ -106,6 +112,32 @@ def build(component, metadata, output):
         if component == "ghostty":
             download(metadata["url"] + ".minisig", work / "source.minisig")
             run("minisign", "-Vm", archive, "-x", work / "source.minisig", "-P", GHOSTTY_KEY)
+        if component == "codex-cli":
+            root = work / "root"
+            bundle = install_codex_bundle(archive, root, metadata)
+            libraries = sorted({path.parent for path in bundle.rglob("*.so*") if path.is_file()})
+            dependencies = {"ca-certificates"}
+            dynamic = []
+            for path in bundle.rglob("*"):
+                if not path.is_file():
+                    continue
+                with path.open("rb") as stream:
+                    is_elf = stream.read(4) == b"\x7fELF"
+                if is_elf and "(NEEDED)" in run("readelf", "-d", path, capture_output=True, text=True).stdout:
+                    dynamic.append(path)
+            if dynamic:
+                value = runtime_dependencies(root, dynamic, libraries)
+                dependencies.update(value.split(", ") if value else ())
+            licenses = work / "licenses"
+            licenses.mkdir()
+            for name in ("LICENSE", "NOTICE"):
+                download(f"https://raw.githubusercontent.com/openai/codex/{metadata['tag']}/{name}", licenses / name)
+            add_copyright(root, "codex-cli", licenses, "https://github.com/openai/codex")
+            shutil.copy2(licenses / "NOTICE", root / "usr/share/doc/codex-cli/NOTICE")
+            run(root / "usr/bin/codex", "--version")
+            control(root, "codex-cli", upstream, ", ".join(sorted(dependencies)), "OpenAI Codex command line coding agent")
+            package(root, "codex-cli", upstream, output)
+            return
         source = extract(archive, work / "source")
         root = work / "root"
         (root / "usr/bin").mkdir(parents=True)
@@ -184,7 +216,7 @@ def build(component, metadata, output):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("component", choices=["uv", "zig", "ghostty", "chatgpt"])
+    parser.add_argument("component", choices=["uv", "zig", "ghostty", "chatgpt", "codex-cli", "clash-verge"])
     parser.add_argument("--plan", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
