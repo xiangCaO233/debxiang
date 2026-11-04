@@ -10,7 +10,7 @@ from common import run
 
 
 def prune_packages(pool, keep=3):
-    """Bound Pages storage; older versions remain in GitHub Releases."""
+    """限制构建机的工作集；已发布的 NAS 下载文件由发布器长期保留。"""
     groups = {}
     for path in pool.glob("*.deb"):
         name = run("dpkg-deb", "--field", path, "Package", capture_output=True, text=True).stdout.strip()
@@ -62,6 +62,14 @@ def make_repository(pool, site, state, manifest):
         with (packages_dir / "Packages.gz").open("wb") as destination_stream:
             with gzip.GzipFile(fileobj=destination_stream, mode="wb", mtime=0) as compressed:
                 shutil.copyfileobj(source, compressed)
+    # NAS 发布时先写内容寻址索引，旧 Release 与新 Packages 交错也能正确下载。
+    # 不删除已发布的 by-hash 文件，让仍持有旧签名索引的客户端完成更新。
+    for index in (packages_dir / "Packages", packages_dir / "Packages.gz"):
+        for algorithm, directory in (("sha256", "SHA256"), ("sha512", "SHA512")):
+            digest = hashlib.new(algorithm, index.read_bytes()).hexdigest()
+            target = packages_dir / "by-hash" / directory / digest
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(index, target)
     release_dir = site / "dists/trixie"
     with (release_dir / "Release").open("wb") as output:
         run("apt-ftparchive", "-o", "APT::FTPArchive::Release::Origin=debxiang",
@@ -70,6 +78,7 @@ def make_repository(pool, site, state, manifest):
             "-o", "APT::FTPArchive::Release::Codename=trixie",
             "-o", "APT::FTPArchive::Release::Architectures=amd64",
             "-o", "APT::FTPArchive::Release::Components=main",
+            "-o", "APT::FTPArchive::Release::Acquire-By-Hash=yes",
             "release", "dists/trixie", cwd=site, stdout=output)
     home, key = signing_key(state)
     args = ["gpg", "--homedir", home, "--batch", "--yes", "--local-user", key]

@@ -12,12 +12,17 @@ from build import deb_version, package_version
 from common import run
 from discover import DISCOVERERS
 from repository import make_repository, prune_packages
+from nas_publish import validate_destination
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGES = {"uv": ["uv"], "zig": ["zig", "zig-stable"], "ghostty": ["ghostty"], "chatgpt": ["chatgpt"], "codex-cli": ["codex-cli"], "clash-verge": ["clash-verge"]}
 
 
 def maintain(state, site, engine):
+    # 配置 NAS 时必须先验证挂载，防止断线后把公开软件源写到本机空目录。
+    nas_root = os.environ.get("DEBXIANG_NAS_ROOT")
+    if nas_root:
+        validate_destination(Path(nas_root), Path(os.environ["DEBXIANG_NAS_MOUNT"]))
     state.mkdir(parents=True, exist_ok=True)
     with (state / "maintain.lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
@@ -43,9 +48,12 @@ def maintain(state, site, engine):
                    or not all((state / "pool" / f"{pkg}_{package_version(data, name)}_amd64.deb").is_file()
                               for pkg in PACKAGES[name])]
         print("Pending components:", ", ".join(pending) or "none", flush=True)
-        deployed = state / "deployed-manifest.sha256"
+        # NAS 切换使用独立完成标记，旧 Pages 发布记录不能跳过首次迁移或失败重试。
+        deployed = state / ("deployed-nas-manifest.sha256" if nas_root else "deployed-manifest.sha256")
         if (os.environ.get("GITHUB_OUTPUT") and not pending and not failures
                 and manifest_file.exists() and deployed.exists()
+                and (not nas_root or (Path(nas_root) / "manifest.json").is_file()
+                     and (Path(nas_root) / "manifest.json").read_bytes() == manifest_file.read_bytes())
                 and hashlib.sha256(manifest_file.read_bytes()).hexdigest() == deployed.read_text().strip()):
             with open(os.environ["GITHUB_OUTPUT"], "a") as output_file:
                 output_file.write("failures_count=0\nchanged=false\n")
@@ -115,10 +123,10 @@ def maintain(state, site, engine):
                 pool.mkdir()
             for artifact in output.glob("*.deb"):
                 shutil.copy2(artifact, pool / artifact.name)
-            # Keep three recent versions for clients with older indexes.
-            # Unlimited history belongs in Releases, not the Pages site.
+            # 构建机仅保留近期版本，已发布历史由 NAS 和 Releases 继续提供。
             prune_packages(pool)
-            if sum(p.stat().st_size for p in pool.glob("*.deb")) > 900 * 1024**2:
+            # 本地模式仍保留 Pages 容量保护；NAS 模式不再上传包体到 Pages。
+            if not nas_root and sum(p.stat().st_size for p in pool.glob("*.deb")) > 900 * 1024**2:
                 raise RuntimeError("APT package pool exceeds the 900 MiB Pages budget")
             if not list(pool.glob("*.deb")):
                 raise RuntimeError("No verified packages available: " + "; ".join(failures))

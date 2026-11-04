@@ -4,6 +4,15 @@
 
 支持 **Debian 13（trixie）、amd64 / x86_64**。
 
+软件包与签名 APT 索引已迁移到 NAS：`https://gitea.xiang233.top/assets/debxiang/`。GitHub Pages 只提供迁移说明，GitHub Releases 继续保留软件包归档。
+
+已添加旧 GitHub Pages 软件源的用户，需要更新一次地址；签名密钥保持不变：
+
+```bash
+sudo sed -i 's|https://xiangcao233.github.io/debxiang/|https://gitea.xiang233.top/assets/debxiang/|g' /etc/apt/sources.list.d/debxiang.list
+sudo apt update
+```
+
 | 软件包 | 用途 |
 | --- | --- |
 | `uv` | Python 项目和包管理，包含 `uv`、`uvx` |
@@ -28,7 +37,7 @@ sudo apt install ca-certificates curl gnupg
 下载仓库公钥并核对指纹：
 
 ```bash
-curl -fsSL https://xiangcao233.github.io/debxiang/debxiang.asc -o /tmp/debxiang.asc
+curl -fsSL https://gitea.xiang233.top/assets/debxiang/debxiang.asc -o /tmp/debxiang.asc
 gpg --show-keys --with-fingerprint /tmp/debxiang.asc
 ```
 
@@ -44,7 +53,7 @@ gpg --show-keys --with-fingerprint /tmp/debxiang.asc
 sudo install -d -m 0755 /etc/apt/keyrings
 sudo gpg --dearmor --yes -o /etc/apt/keyrings/debxiang.gpg /tmp/debxiang.asc
 sudo chmod 0644 /etc/apt/keyrings/debxiang.gpg
-printf '%s\n' 'deb [arch=amd64 signed-by=/etc/apt/keyrings/debxiang.gpg] https://xiangcao233.github.io/debxiang/ trixie main' \
+printf '%s\n' 'deb [arch=amd64 signed-by=/etc/apt/keyrings/debxiang.gpg] https://gitea.xiang233.top/assets/debxiang/ trixie main' \
   | sudo tee /etc/apt/sources.list.d/debxiang.list
 sudo apt update
 ```
@@ -105,4 +114,4 @@ sudo apt update
 
 移除软件源不会卸载已有软件。需要卸载时，运行 `sudo apt remove` 并指定软件包名。
 
-[软件源站点](https://xiangcao233.github.io/debxiang/) · [软件包下载](https://github.com/xiangCaO233/debxiang/releases)
+[软件源站点](https://gitea.xiang233.top/assets/debxiang/index.html) · [软件包归档](https://github.com/xiangCaO233/debxiang/releases) · [NAS 运维说明](docs/nas-storage.md)

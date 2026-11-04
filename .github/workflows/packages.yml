@@ -26,6 +26,8 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       DEBXIANG_STATE: /home/xiang/.local/state/debxiang
+      DEBXIANG_NAS_MOUNT: /mnt/nas/public2
+      DEBXIANG_NAS_ROOT: /mnt/nas/public2/services/debxiang
     steps:
       - uses: actions/checkout@v6
       - name: Verify scripts
@@ -40,12 +42,20 @@ jobs:
         run: |
           set -euo pipefail
           python3 scripts/publish.py --site "$RUNNER_TEMP/debxiang-site"
+      - name: Publish signed APT repository to NAS
+        if: steps.maintain.outputs.changed == 'true'
+        run: |
+          set -euo pipefail
+          python3 scripts/nas_publish.py --site "$RUNNER_TEMP/debxiang-site" \
+            --root "$DEBXIANG_NAS_ROOT" --mount "$DEBXIANG_NAS_MOUNT" \
+            --pages "$RUNNER_TEMP/debxiang-pages-${{ github.run_id }}-${{ github.run_attempt }}" \
+            --base-url https://gitea.xiang233.top/assets/debxiang/
       - uses: actions/configure-pages@v5
         if: steps.maintain.outputs.changed == 'true'
       - uses: actions/upload-pages-artifact@v3
         if: steps.maintain.outputs.changed == 'true'
         with:
-          path: ${{ runner.temp }}/debxiang-site
+          path: ${{ runner.temp }}/debxiang-pages-${{ github.run_id }}-${{ github.run_attempt }}
   deploy:
     needs: packages
     if: needs.packages.outputs.changed == 'true'
@@ -54,13 +64,13 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - name: Deploy signed APT repository
+      - name: Deploy repository migration page
         id: deployment
         uses: actions/deploy-pages@v4
       - name: Remember successfully deployed package manifest
         run: |
-          printf '%s\n' '${{ needs.packages.outputs.manifest_sha256 }}' > /home/xiang/.local/state/debxiang/deployed-manifest.sha256.tmp
-          mv /home/xiang/.local/state/debxiang/deployed-manifest.sha256.tmp /home/xiang/.local/state/debxiang/deployed-manifest.sha256
+          printf '%s\n' '${{ needs.packages.outputs.manifest_sha256 }}' > /home/xiang/.local/state/debxiang/deployed-nas-manifest.sha256.tmp
+          mv /home/xiang/.local/state/debxiang/deployed-nas-manifest.sha256.tmp /home/xiang/.local/state/debxiang/deployed-nas-manifest.sha256
       - name: Report failed components after publishing verified updates
         if: needs.packages.outputs.failures_count != '0'
         run: |

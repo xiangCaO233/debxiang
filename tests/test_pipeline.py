@@ -190,6 +190,13 @@ class SignedRepositoryTests(unittest.TestCase):
             self.assertEqual(self._field(packages, "Filename"), f"pool/main/{package.name}")
             self.assertEqual(self._field(packages, "SHA256"), package_digest)
 
+            # 发布期间客户端持有旧 Release 时，仍能按内容摘要获取原索引。
+            for index in (packages_path, packages_path.with_suffix(".gz")):
+                for algorithm, directory in (("sha256", "SHA256"), ("sha512", "SHA512")):
+                    digest = hashlib.new(algorithm, index.read_bytes()).hexdigest()
+                    self.assertEqual((index.parent / "by-hash" / directory / digest).read_bytes(), index.read_bytes())
+            self.assertIn("Acquire-By-Hash: yes", (first_site / "dists/trixie/Release").read_text())
+
             with gzip.open(packages_path.with_suffix(".gz"), "rb") as compressed:
                 self.assertEqual(compressed.read(), packages_path.read_bytes())
 
