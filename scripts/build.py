@@ -8,13 +8,14 @@ import shutil
 import tempfile
 from codex_package import install_codex_bundle
 from common import download, extract, get_json, request, run, version
+from ghostty_package import materialize_zig_cache
 
 GHOSTTY_KEY = "RWQlAjJC23149WL2sEpT/l0QKy7hMIFhYdQOFy0Z7z7PbneUgvlsnYcV"
 
 
 def deb_version(upstream, component=None):
-    # A new packaging revision must exceed Griffo's installed version too.
-    revision = 2 if component == "ghostty" else 1
+    # 打包修订须超过旧源版本；Ghostty 新修订包含缓存解包及正式版身份修复。
+    revision = 3 if component == "ghostty" else 1
     return version(upstream) + f"-100~debxiang{revision}~trixie"
 
 
@@ -194,20 +195,29 @@ def build(component, metadata, output):
             environment = dict(os.environ, DESTDIR=str(root), ZIG_GLOBAL_CACHE_DIR=str(work / "zig-cache"),
                                PATH=str(compiler.parent) + os.pathsep + os.environ["PATH"])
             run("bash", source / "nix/build-support/fetch-zig-cache.sh", cwd=source, env=environment)
+            # 0.17 将 fetch 缓存改为归档，直接进入只读 --system 会触发 Maker 断言。
+            # 旧编译器已经生成解包目录，跳过这个额外的准备阶段。
+            if tuple(map(int, zig_version.split("."))) >= (0, 17, 0):
+                materialize_zig_cache(compiler, work / "zig-cache/p", environment)
             run(compiler, "build", "--prefix", "/usr", "--system", work / "zig-cache/p",
                 "-fno-sys=harfbuzz",
+                # 正式源码归档没有 Git 元数据，显式指定已验证版本以保持稳定版身份。
+                "-Dversion-string=" + upstream,
                 "-Doptimize=ReleaseFast", "-Dcpu=baseline",
                 "-j" + str(jobs), cwd=source, env=environment)
             binary = root / "usr/bin/ghostty"
             if not binary.is_file():
                 raise ValueError("Ghostty install did not produce /usr/bin/ghostty")
-            # Debian ncurses-term owns the compatibility name "ghostty".
-            # Keep the upstream xterm-ghostty entry used by TERM, but never
-            # claim ncurses-term's file or force dpkg to overwrite it.
-            (root / "usr/share/terminfo/g/ghostty").unlink()
+            # ncurses-term 拥有兼容名称 ghostty；包内只保留实际使用的 xterm-ghostty。
+            # 1.4 已不生成该别名，旧版本生成时仍须移除，避免覆盖系统文件。
+            (root / "usr/share/terminfo/g/ghostty").unlink(missing_ok=True)
             dependency = runtime_dependencies(root, binary)
             add_copyright(root, "ghostty", source, "https://github.com/ghostty-org/ghostty")
-            run(binary, "+version")
+            version_output = run(binary, "+version", capture_output=True, text=True).stdout
+            print(version_output, end="")
+            # 包版本和程序自报版本必须一致，避免正式源码被标记为 dev/tip。
+            if not version_output.startswith(f"Ghostty {upstream}\n"):
+                raise ValueError("Ghostty binary does not report the selected stable version")
             control(root, "ghostty", upstream, dependency, "GPU accelerated terminal emulator")
             package(root, "ghostty", upstream, output)
         else:

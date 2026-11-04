@@ -43,7 +43,9 @@ class DiscoveryTests(unittest.TestCase):
 class PackagingVersionTests(unittest.TestCase):
     def test_ghostty_fix_is_newer_without_rebuilding_other_components(self):
         self.assertEqual(package_version({"version": "1.3.1"}, "ghostty"),
-                         "1.3.1-100~debxiang2~trixie")
+                         "1.3.1-100~debxiang3~trixie")
+        self.assertEqual(package_version({"version": "1.4.0"}, "ghostty"),
+                         "1.4.0-100~debxiang3~trixie")
         self.assertEqual(package_version({"version": "0.12.23"}, "uv"),
                          "0.12.23-100~debxiang1~trixie")
         self.assertEqual(package_version({"version": "26.1002.52244",
