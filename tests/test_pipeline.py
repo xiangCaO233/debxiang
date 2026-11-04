@@ -340,7 +340,7 @@ class SignedRepositoryTests(unittest.TestCase):
                     "run",
                     side_effect=AssertionError("engine/build command must not run when pending is empty"),
                 ) as run_mock,
-                mock.patch.dict(os.environ, {"GITHUB_OUTPUT": str(github_output)}, clear=False),
+                mock.patch.dict(os.environ, {"GITHUB_OUTPUT": str(github_output), "DEBXIANG_NAS_ROOT": ""}, clear=False),
             ):
                 failures = maintain_script.maintain(state, site, "podman")
 
@@ -382,7 +382,7 @@ class SignedRepositoryTests(unittest.TestCase):
             with (mock.patch.object(maintain_script, "DISCOVERERS", {"uv": lambda: metadata}),
                   mock.patch.object(maintain_script, "run", side_effect=AssertionError("No container needed")),
                   mock.patch.object(maintain_script, "make_repository", wraps=make_repository) as sign,
-                  mock.patch.dict(os.environ, {"GITHUB_OUTPUT": str(output)})):
+                  mock.patch.dict(os.environ, {"GITHUB_OUTPUT": str(output), "DEBXIANG_NAS_ROOT": ""})):
                 self.assertEqual(maintain_script.maintain(state, site, "podman"), [])
                 self.assertEqual(output.read_text(), "failures_count=0\nchanged=false\n")
                 sign.assert_not_called()
@@ -395,6 +395,34 @@ class SignedRepositoryTests(unittest.TestCase):
                 self.assertIn("changed=true\n", output.read_text())
                 sign.assert_called_once()
                 self.assertTrue((site / "dists/trixie/InRelease").is_file())
+
+                # 旧 Pages 记录不能代替 NAS 发布成功；重试期间即使无新包也要发布。
+                nas = root / "nas-mount/repository"
+                nas.mkdir(parents=True)
+                nas_manifest = nas / "manifest.json"
+                nas_manifest.write_bytes(manifest.read_bytes())
+                deployed.write_text(hashlib.sha256(manifest.read_bytes()).hexdigest() + "\n")
+                with (mock.patch.dict(os.environ, {"DEBXIANG_NAS_ROOT": str(nas),
+                                                  "DEBXIANG_NAS_MOUNT": str(nas.parent)}),
+                      mock.patch("nas_publish.os.path.ismount", return_value=True)):
+                    output.write_text("")
+                    self.assertEqual(maintain_script.maintain(state, site, "podman"), [])
+                    self.assertIn("changed=true\n", output.read_text())
+                    self.assertEqual(sign.call_count, 2)
+                    # 两端清单及独立成功标记都一致时才允许跳过后续小时检查。
+                    nas_manifest.write_bytes(manifest.read_bytes())
+                    nas_deployed = state / "deployed-nas-manifest.sha256"
+                    nas_deployed.write_text(hashlib.sha256(manifest.read_bytes()).hexdigest() + "\n")
+                    output.write_text("")
+                    self.assertEqual(maintain_script.maintain(state, site, "podman"), [])
+                    self.assertEqual(output.read_text(), "failures_count=0\nchanged=false\n")
+                    self.assertEqual(sign.call_count, 2)
+                    # NAS 数据恢复为旧清单时需要重新发布，不能仅信任本地标记。
+                    nas_manifest.write_text("{}\n")
+                    output.write_text("")
+                    self.assertEqual(maintain_script.maintain(state, site, "podman"), [])
+                    self.assertIn("changed=true\n", output.read_text())
+                    self.assertEqual(sign.call_count, 3)
 
 
 if __name__ == "__main__":
